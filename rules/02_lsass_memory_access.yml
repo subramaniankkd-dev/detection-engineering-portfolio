@@ -1,0 +1,32 @@
+title: LSASS Memory Access by Suspicious Process (Credential Dumping)
+id: a1b2c3d4-0002-4f00-9a02-lsassdump00002
+status: experimental
+description: Detects a process opening a handle to lsass.exe with access rights
+  commonly used to dump credentials (e.g. Mimikatz, comsvcs.dll MiniDump).
+references:
+  - https://attack.mitre.org/techniques/T1003/001/
+author: Subramanian Karthick
+date: 2026/05/30
+tags:
+  - attack.credential-access
+  - attack.t1003.001
+logsource:
+  product: windows
+  category: process_access
+detection:
+  selection:
+    TargetImage|endswith: '\lsass.exe'
+    GrantedAccess:
+      - '0x1010'
+      - '0x1410'
+      - '0x143a'
+      - '0x1438'
+  filter_legit:
+    SourceImage|endswith:
+      - '\MsMpEng.exe'
+      - '\wininit.exe'
+  condition: selection and not filter_legit
+falsepositives:
+  - AV / EDR agents inspecting LSASS
+  - Backup or system management tools
+level: high

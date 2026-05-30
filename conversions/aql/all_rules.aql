@@ -1,0 +1,96 @@
+-- =====================================================================
+-- AQL Conversions (IBM QRadar - Ariel Query Language)
+-- Author: Subramanian Karthick
+-- Note: Custom property names (e.g. "Ticket Encryption Type") assume
+--       parsed/normalized properties. Adjust to your DSM/log source.
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 01 - Kerberoasting (Service Ticket Request) | T1558.003
+-- ---------------------------------------------------------------------
+SELECT
+    "Account Name" AS account,
+    sourceip,
+    "Service Name" AS service,
+    COUNT(*) AS request_count
+FROM events
+WHERE
+    qid = 5000769                              -- map to your 4769 QID
+    AND "Ticket Encryption Type" = '0x17'
+    AND "Ticket Options" = '0x40810000'
+    AND "Service Name" NOT LIKE '%$'
+GROUP BY account, sourceip
+HAVING request_count >= 10
+LAST 1 HOURS;
+
+
+-- ---------------------------------------------------------------------
+-- 02 - LSASS Memory Access (Credential Dumping) | T1003.001
+-- ---------------------------------------------------------------------
+SELECT
+    QIDNAME(qid) AS event_name,
+    "Source Image" AS source_process,
+    "Target Image" AS target_process,
+    "Granted Access" AS granted_access,
+    username
+FROM events
+WHERE
+    "Target Image" ILIKE '%\lsass.exe'
+    AND "Granted Access" IN ('0x1010', '0x1410', '0x143a', '0x1438')
+    AND "Source Image" NOT ILIKE '%\MsMpEng.exe'
+    AND "Source Image" NOT ILIKE '%\wininit.exe'
+LAST 24 HOURS;
+
+
+-- ---------------------------------------------------------------------
+-- 03 - PowerShell EncodedCommand | T1059.001 / T1027
+-- ---------------------------------------------------------------------
+SELECT
+    "Process Name" AS process,
+    "Command Line" AS cmdline,
+    username,
+    sourceip
+FROM events
+WHERE
+    ("Process Name" ILIKE '%\powershell.exe'
+        OR "Process Name" ILIKE '%\pwsh.exe')
+    AND ("Command Line" ILIKE '% -enc %'
+        OR "Command Line" ILIKE '% -EncodedCommand %'
+        OR "Command Line" ILIKE '% -e %')
+LAST 24 HOURS;
+
+
+-- ---------------------------------------------------------------------
+-- 04 - AWS Root Console Login | T1078.004
+-- ---------------------------------------------------------------------
+SELECT
+    "User Identity Type" AS identity_type,
+    sourceip,
+    "User Identity ARN" AS arn,
+    "AWS Region" AS region
+FROM events
+WHERE
+    LOGSOURCETYPENAME(devicetype) = 'Amazon AWS CloudTrail'
+    AND "Event Name" = 'ConsoleLogin'
+    AND "User Identity Type" = 'Root'
+    AND "Console Login Result" = 'Success'
+LAST 24 HOURS;
+
+
+-- ---------------------------------------------------------------------
+-- 05 - Linux Reverse Shell | T1059.004
+-- ---------------------------------------------------------------------
+SELECT
+    "Process Name" AS process,
+    "Command Line" AS cmdline,
+    username,
+    sourceip
+FROM events
+WHERE
+    "Command Line" ILIKE '%/dev/tcp/%'
+    OR "Command Line" ILIKE '%/dev/udp/%'
+    OR "Command Line" ILIKE '%sh -i%'
+    OR (("Process Name" ILIKE '%/nc' OR "Process Name" ILIKE '%/ncat')
+        AND ("Command Line" ILIKE '% -e %'
+            OR "Command Line" ILIKE '%--exec%'))
+LAST 24 HOURS;

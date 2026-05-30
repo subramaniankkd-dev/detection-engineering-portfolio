@@ -1,0 +1,68 @@
+// =====================================================================
+// KQL Conversions (Microsoft Sentinel / Defender XDR)
+// Author: Subramanian Karthick
+// =====================================================================
+
+// ---------------------------------------------------------------------
+// 01 - Kerberoasting (Service Ticket Request) | T1558.003
+// Source table: SecurityEvent (4769)
+// ---------------------------------------------------------------------
+SecurityEvent
+| where EventID == 4769
+| where TicketEncryptionType == "0x17"        // RC4-HMAC
+| where TicketOptions == "0x40810000"
+| where ServiceName !endswith "$"             // exclude machine accounts
+| summarize RequestCount = count(), Services = make_set(ServiceName)
+    by Account, Computer, bin(TimeGenerated, 1h)
+| where RequestCount >= 10                     // tune threshold per environment
+| project TimeGenerated, Account, Computer, RequestCount, Services
+
+
+// ---------------------------------------------------------------------
+// 02 - LSASS Memory Access (Credential Dumping) | T1003.001
+// Source table: DeviceEvents
+// ---------------------------------------------------------------------
+DeviceEvents
+| where ActionType == "OpenProcessApiCall"
+| where FileName =~ "lsass.exe"
+| extend GrantedAccess = tostring(parse_json(AdditionalFields).GrantedAccess)
+| where GrantedAccess in ("0x1010", "0x1410", "0x143a", "0x1438")
+| where InitiatingProcessFileName !in~ ("MsMpEng.exe", "wininit.exe")
+| project Timestamp, DeviceName, InitiatingProcessFileName,
+          InitiatingProcessCommandLine, GrantedAccess, AccountName
+
+
+// ---------------------------------------------------------------------
+// 03 - PowerShell EncodedCommand | T1059.001 / T1027
+// Source table: DeviceProcessEvents
+// ---------------------------------------------------------------------
+DeviceProcessEvents
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+| where ProcessCommandLine matches regex @"(?i)\s-e(nc|ncodedcommand)?\s"
+| project Timestamp, DeviceName, AccountName, ProcessCommandLine,
+          InitiatingProcessFileName
+
+
+// ---------------------------------------------------------------------
+// 04 - AWS Root Console Login | T1078.004
+// Source table: AWSCloudTrail
+// ---------------------------------------------------------------------
+AWSCloudTrail
+| where EventName == "ConsoleLogin"
+| where parse_json(UserIdentity).type == "Root"
+| where parse_json(ResponseElements).ConsoleLogin == "Success"
+| project TimeGenerated, SourceIpAddress, UserIdentityArn,
+          AWSRegion, UserAgent
+
+
+// ---------------------------------------------------------------------
+// 05 - Linux Reverse Shell | T1059.004
+// Source table: DeviceProcessEvents (Defender for Endpoint - Linux)
+// ---------------------------------------------------------------------
+DeviceProcessEvents
+| where ProcessCommandLine has_any ("/dev/tcp/", "/dev/udp/")
+    or ProcessCommandLine has "sh -i"
+    or (FileName in~ ("nc", "ncat")
+        and ProcessCommandLine has_any (" -e ", "--exec"))
+| project Timestamp, DeviceName, AccountName, FileName,
+          ProcessCommandLine, InitiatingProcessFileName

@@ -1,0 +1,27 @@
+title: AWS Root Account Console Login
+id: a1b2c3d4-0004-4f00-9a04-awsrootlogin004
+status: experimental
+description: Detects a successful console login using the AWS root account. Root
+  usage should be rare and tightly controlled; routine usage indicates a policy
+  violation or potential compromise.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+author: Subramanian Karthick
+date: 2026/05/30
+tags:
+  - attack.privilege-escalation
+  - attack.persistence
+  - attack.t1078.004
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName: ConsoleLogin
+    userIdentity.type: Root
+    responseElements.ConsoleLogin: Success
+  condition: selection
+falsepositives:
+  - Approved break-glass procedures
+  - Initial account setup activity
+level: high
